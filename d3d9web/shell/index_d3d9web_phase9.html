@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>D3D9Web Phase 9 - Pre-PatHouse Surface</title>
+  <style>
+    :root{color-scheme:dark;font-family:"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;background:#11151c;color:#e8edf5}
+    header{display:flex;align-items:center;gap:14px;padding:12px 18px;background:#192230;border-bottom:1px solid #304057}h1{margin:0;font-size:18px}.badge{padding:3px 8px;border-radius:999px;background:#123e31;color:#8ff0c5;font-size:12px}
+    main{padding:14px}.controls{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px}button,input[type=button]{border:1px solid #4f79b8;border-radius:7px;padding:8px 13px;background:#285b9e;color:white;cursor:pointer}button:disabled{opacity:.55;cursor:wait}#loading{display:none}#dropzone{width:fit-content;max-width:100%;margin:0 auto;background:#000;box-shadow:0 0 0 1px #33445b}canvas{display:block;max-width:100%}textarea{width:min(100%,1200px);margin:12px auto 0;display:block;min-height:240px;padding:8px;background:#080b10;color:#b8e4bc;border:1px solid #33445b;font:12px/1.4 Consolas,monospace}.modalDialog{display:none}.note{color:#9fb0c7;font-size:13px}
+  </style>
+</head>
+<body>
+  <header><h1>D3D9Web PatHouse 전 필수 표면</h1><span class="badge">Phase 9 measured gate</span></header>
+  <main>
+    <p class="note">Acknex의 실제 mip Surface 업로드, 디바이스 Reset/backbuffer, 고정기능 조명 상태, VCACHE 쿼리를 합성 검증합니다. 게임 콘텐츠는 실행하지 않습니다.</p>
+    <div id="run-inline" class="controls"><button id="inline-runbtn" onclick="startAzrok()" disabled>준비 중</button><span id="runtime-status">FFP 런타임 준비 중</span></div>
+    <div id="loading"><div id="spinner">Loading</div><div id="status">로컬 Wine 환경 준비 중</div><progress value="0" max="100" id="progress" hidden></progress></div>
+    <div id="inline" style="display:none">
+      <div class="controls"><button id="startbtn" style="display:none" onclick="start()">Start</button><button id="uploadbtn" style="display:none" onclick="document.getElementById('upload').click()">파일 추가</button><input style="display:none" id="upload" onchange="startWithFiles(event.target.files)" type="file" multiple><button id="downloadbtn" style="display:none" onclick="buildTree()">파일 꺼내기</button><span id="sound-checkbox" style="display:none"><input type="checkbox" id="soundToggle" onclick="toggleSound()"> 소리</span><label><input type="checkbox" id="pointerLock" checked> 마우스 잠금</label><label><input type="checkbox" id="showConsole" onclick="toggleConsole()" checked> 콘솔</label><label><input type="checkbox" id="resize"> 캔버스 조정</label><input type="button" value="전체 화면" onclick="Module.requestFullScreen(document.getElementById('pointerLock').checked,document.getElementById('resize').checked)"></div>
+      <div id="dropzone"><canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas></div><textarea id="output" rows="12" readonly></textarea>
+      <a style="display:none" id="modalLink" href="#openModal">Open</a><a style="display:none" id="modalLinkExe" href="#openModalExe">Open</a><div id="openModal" class="modalDialog"><input id="selectedItem" readonly><div id="tree"></div><h3 id="loadStatus">Loading</h3></div><div id="openModalExe" class="modalDialog"><a id="openModalExeClick" href="#close">X</a><div id="message"></div><div id="items"></div></div>
+    </div>
+  </main>
+  <!-- BrowserFS (browserfs.boxedwine.js) is not shipped: this fork shell never references it. See THIRD_PARTY_NOTICES.md. --><script src="assets/jszip.min.js"></script><script src="assets_d3d9web/boxedwine-shell.js"></script>
+  <script>
+    Module.locateFile=url=>"assets_d3d9web/"+url;
+    function startAzrok(){if(!globalThis.D3D9WebRuntime)return;document.getElementById("inline-runbtn").disabled=true;document.getElementById("run-inline").style.display="none";document.getElementById("loading").style.display="block";document.getElementById("inline").style.display="block";Config.isRunningInline=true;Config.showUploadDownload=true;Config.locateRootBaseUrl="fs/";Config.locateAppBaseUrl="apps/";Config.locateOverlayBaseUrl="apps/";Config.urlParams=["ondemand=root","root=fullWine1.7.55-v8","inline-default-ondemand-root-overlay=wine1.7.55-v8-min-online","app=D3D9Web_phase9","p=run_browser.bat","auto=true","sound=false"].join("&");const s=document.createElement("script");s.src="assets_d3d9web/boxedwine.js";s.onerror=()=>document.getElementById("status").textContent="boxedwine.js 로드 실패";document.body.appendChild(s)}
+  </script>
+  <script type="module">
+    import{prepareD3D9WebRuntime}from'/web_backend/host/d3d9web-runtime.js?v=phase9b';const b=document.getElementById('inline-runbtn'),s=document.getElementById('runtime-status');try{globalThis.D3D9WebRuntime=await prepareD3D9WebRuntime({canvas:document.getElementById('canvas'),vertexUrl:'/web_backend/shaders/d3d9_ffp.vert',fragmentUrl:'/web_backend/shaders/d3d9_ffp.frag'});s.textContent='FFP 런타임 준비 완료';b.textContent='Phase 9 실행';b.disabled=false;console.log('D3D9WEB_PHASE9_RUNTIME_READY')}catch(e){s.textContent='런타임 준비 실패: '+e;console.error(e)}
+  </script>
+</body></html>

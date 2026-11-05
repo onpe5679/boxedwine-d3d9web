@@ -1,0 +1,481 @@
+diff --git a/dlls/comctl32_v6/edit.c b/dlls/comctl32_v6/edit.c
+--- a/dlls/comctl32_v6/edit.c
++++ b/dlls/comctl32_v6/edit.c
+@@ -4961,11 +4961,16 @@
+         EDIT_UpdateImmCompositionFont(es);
+         break;
+ 
+-    case WM_IME_COMPOSITION:
+-        EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
+-        if ((lParam & GCS_RESULTSTR) && (es->ime_status & EIMES_GETCOMPSTRATONCE))
+-            EDIT_ImeComposition(hwnd, lParam, es);
+-        return DefWindowProcW(hwnd, msg, wParam, lParam);
++	case WM_IME_COMPOSITION:
++		EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
++		if (lParam & GCS_RESULTSTR)
++		{
++			fprintf(stderr, "D3D9WEB_IME_EDIT_V6_RESULT status=%08lx\n",
++			        (unsigned long)es->ime_status);
++			EDIT_ImeComposition(hwnd, lParam, es);
++			if (!(es->ime_status & EIMES_GETCOMPSTRATONCE)) return 0;
++		}
++		return DefWindowProcW(hwnd, msg, wParam, lParam);
+ 
+     case WM_IME_SELECT:
+         break;
+diff --git a/dlls/dsound/primary.c b/dlls/dsound/primary.c
+--- a/dlls/dsound/primary.c
++++ b/dlls/dsound/primary.c
+@@ -327,7 +327,10 @@
+     period_ms = (period + 9999) / 10000;
+     frag_frames = MulDiv(wfx->nSamplesPerSec, period, 10000000);
+ 
+-    aclen_frames = min(acbuf_frames, 3 * frag_frames);
++    /* Browser workers can resume tens of milliseconds after wineoss's 10 ms
++     * timer expires. Keep the full 80 ms AudioClient buffer populated instead
++     * of limiting DirectSound's producer watermark to about 32 ms. */
++    aclen_frames = acbuf_frames;
+ 
+     TRACE("period %lu ms frag_frames %lu buf_frames %u\n", period_ms, frag_frames, aclen_frames);
+ 
+diff --git a/dlls/imm32/imm.c b/dlls/imm32/imm.c
+--- a/dlls/imm32/imm.c
++++ b/dlls/imm32/imm.c
+@@ -1445,6 +1445,13 @@
+ 
+ /* Helpers for the GetCompositionString functions */
+ 
++/* This DLL is packaged only in the preserved Azrok root.  Its ANSI controls
++ * and network strings are CP949 even when a browser's old IndexedDB prefix
++ * still reports an English process ACP. */
++#ifndef AZROK_INPUT_CODEPAGE
++#define AZROK_INPUT_CODEPAGE 949
++#endif
++
+ /* Source encoding is defined by context, source length is always given in respective characters. Destination buffer
+    length is always in bytes. */
+ static INT CopyCompStringIMEtoClient( BOOL src_unicode, const void *src, INT src_len,
+@@ -1456,9 +1463,9 @@
+     if (src_unicode ^ dst_unicode)
+     {
+         if (dst_unicode)
+-            ret = MultiByteToWideChar(CP_ACP, 0, src, src_len, dst, dst_len / sizeof(WCHAR));
++            ret = MultiByteToWideChar(AZROK_INPUT_CODEPAGE, 0, src, src_len, dst, dst_len / sizeof(WCHAR));
+         else
+-            ret = WideCharToMultiByte(CP_ACP, 0, src, src_len, dst, dst_len, NULL, NULL);
++            ret = WideCharToMultiByte(AZROK_INPUT_CODEPAGE, 0, src, src_len, dst, dst_len, NULL, NULL);
+         ret *= char_size;
+     }
+     else
+@@ -1492,7 +1499,7 @@
+ 
+     if (src_unicode && !unicode)
+     {
+-        rc = WideCharToMultiByte(CP_ACP, 0, string.strW, str_len, NULL, 0, NULL, NULL);
++        rc = WideCharToMultiByte(AZROK_INPUT_CODEPAGE, 0, string.strW, str_len, NULL, 0, NULL, NULL);
+         if (dst_len)
+         {
+             int i, j = 0, k = 0;
+@@ -1503,7 +1510,7 @@
+             {
+                 int len;
+ 
+-                len = WideCharToMultiByte(CP_ACP, 0, string.strW + i, 1, NULL, 0, NULL, NULL);
++                len = WideCharToMultiByte(AZROK_INPUT_CODEPAGE, 0, string.strW + i, 1, NULL, 0, NULL, NULL);
+                 for (; len > 0; --len)
+                 {
+                     dst[j++] = src[k];
+@@ -1519,7 +1526,7 @@
+     }
+     else if (!src_unicode && unicode)
+     {
+-        rc = MultiByteToWideChar(CP_ACP, 0, string.strA, str_len, NULL, 0);
++        rc = MultiByteToWideChar(AZROK_INPUT_CODEPAGE, 0, string.strA, str_len, NULL, 0);
+         if (dst_len)
+         {
+             int i, j = 0;
+@@ -1528,7 +1535,7 @@
+                 dst_len = rc;
+             for (i = 0; i < str_len; ++i)
+             {
+-                if (IsDBCSLeadByte(string.strA[i]))
++                if (IsDBCSLeadByteEx(AZROK_INPUT_CODEPAGE, string.strA[i]))
+                     continue;
+ 
+                 dst[j++] = src[i];
+@@ -1564,7 +1571,7 @@
+             tlen /= sizeof (DWORD);
+             for (i = 0; i < tlen; ++i)
+             {
+-                ((DWORD *)target)[i] = WideCharToMultiByte(CP_ACP, 0, (LPWSTR)ssource,
++                ((DWORD *)target)[i] = WideCharToMultiByte(AZROK_INPUT_CODEPAGE, 0, (LPWSTR)ssource,
+                                                           ((DWORD *)source)[i],
+                                                           NULL, 0,
+                                                           NULL, NULL);
+@@ -1585,7 +1592,7 @@
+             tlen /= sizeof (DWORD);
+             for (i = 0; i < tlen; ++i)
+             {
+-                ((DWORD *)target)[i] = MultiByteToWideChar(CP_ACP, 0, (LPSTR)ssource,
++                ((DWORD *)target)[i] = MultiByteToWideChar(AZROK_INPUT_CODEPAGE, 0, (LPSTR)ssource,
+                                                           ((DWORD *)source)[i],
+                                                           NULL, 0);
+             }
+@@ -1609,11 +1616,11 @@
+ 
+     if (src_unicode && !unicode)
+     {
+-        rc = WideCharToMultiByte(CP_ACP, 0, (LPWSTR)ssource, offset, NULL, 0, NULL, NULL);
++        rc = WideCharToMultiByte(AZROK_INPUT_CODEPAGE, 0, (LPWSTR)ssource, offset, NULL, 0, NULL, NULL);
+     }
+     else if (!src_unicode && unicode)
+     {
+-        rc = MultiByteToWideChar(CP_ACP, 0, (LPSTR)ssource, offset, NULL, 0);
++        rc = MultiByteToWideChar(AZROK_INPUT_CODEPAGE, 0, (LPSTR)ssource, offset, NULL, 0);
+     }
+     else
+         rc = offset;
+diff --git a/dlls/kernelbase/sync.c b/dlls/kernelbase/sync.c
+--- a/dlls/kernelbase/sync.c
++++ b/dlls/kernelbase/sync.c
+@@ -42,6 +42,33 @@
+ 
+ static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
+ 
++#ifdef AZROK_BOXEDWINE_WAIT_MARKER
++/*
++ * Local measurement ABI for the Azrok BoxedWine build. The private high number
++ * 0x7f00 is intercepted before BoxedWine's Linux syscall table. The production
++ * Wine build does not define this flag.
++ */
++static __thread unsigned int azrok_wait_marker_depth;
++
++static inline void azrok_boxedwine_wait_marker( DWORD phase, DWORD timeout,
++                                                const void *caller, ULONG_PTR value )
++{
++#if defined(__i386__)
++    register ULONG result __asm__("eax") = 0x7f00;
++
++    __asm__ volatile ("int $0x80"
++                      : "+a" (result)
++                      : "b" (phase), "c" (timeout), "d" ((ULONG_PTR)caller), "S" (value)
++                      : "cc", "memory");
++#else
++    (void)phase;
++    (void)timeout;
++    (void)caller;
++    (void)value;
++#endif
++}
++#endif
++
+ /* check if current version is NT or Win95 */
+ static inline BOOL is_version_nt(void)
+ {
+@@ -395,7 +422,19 @@
+  */
+ DWORD WINAPI DECLSPEC_HOTPATCH WaitForSingleObject( HANDLE handle, DWORD timeout )
+ {
++#ifdef AZROK_BOXEDWINE_WAIT_MARKER
++    const void *caller = __builtin_return_address(0);
++    DWORD result;
++
++    azrok_boxedwine_wait_marker( 1, timeout, caller, (ULONG_PTR)handle );
++    azrok_wait_marker_depth++;
++    result = WaitForSingleObjectEx( handle, timeout, FALSE );
++    azrok_wait_marker_depth--;
++    azrok_boxedwine_wait_marker( 2, timeout, caller, result );
++    return result;
++#else
+     return WaitForSingleObjectEx( handle, timeout, FALSE );
++#endif
+ }
+ 
+ 
+@@ -406,6 +445,13 @@
+ {
+     NTSTATUS status;
+     LARGE_INTEGER time;
++#ifdef AZROK_BOXEDWINE_WAIT_MARKER
++    const void *caller = __builtin_return_address(0);
++    BOOL marker_owner = !azrok_wait_marker_depth;
++
++    if (marker_owner) azrok_boxedwine_wait_marker( 1, timeout, caller, (ULONG_PTR)handle );
++    azrok_wait_marker_depth++;
++#endif
+ 
+     status = NtWaitForSingleObject( normalize_std_handle( handle ), alertable,
+                                     get_nt_timeout( &time, timeout ) );
+@@ -415,6 +461,10 @@
+         SetLastError( RtlNtStatusToDosError(status) );
+         status = WAIT_FAILED;
+     }
++#ifdef AZROK_BOXEDWINE_WAIT_MARKER
++    azrok_wait_marker_depth--;
++    if (marker_owner) azrok_boxedwine_wait_marker( 2, timeout, caller, status );
++#endif
+     return status;
+ }
+ 
+diff --git a/dlls/ntdll/unix/socket.c b/dlls/ntdll/unix/socket.c
+--- a/dlls/ntdll/unix/socket.c
++++ b/dlls/ntdll/unix/socket.c
+@@ -1652,6 +1652,8 @@
+         {
+             const struct afd_event_select_params *params = in_buffer;
+ 
++            fprintf( stderr, "D3D9WEB_NTDLL_AFD_EVENT_SELECT handle=%p event=%p mask=%#x\\n",
++                     handle, params->event, params->mask );
+             TRACE( "event %p, mask %#x\n", params->event, params->mask );
+             if (out_size) FIXME( "unexpected output size %u\n", out_size );
+ 
+diff --git a/dlls/user32/defwnd.c b/dlls/user32/defwnd.c
+--- a/dlls/user32/defwnd.c
++++ b/dlls/user32/defwnd.c
+@@ -66,7 +66,7 @@
+         unsigned char c = buf[i];
+         if (!lead)
+         {
+-            if (IsDBCSLeadByte( c )) lead = c;
++            if (IsDBCSLeadByteEx( get_input_codepage(), c )) lead = c;
+             else SendMessageA( hwnd, WM_IME_CHAR, c, 1 );
+         }
+         else
+diff --git a/dlls/user32/message.c b/dlls/user32/message.c
+--- a/dlls/user32/message.c
++++ b/dlls/user32/message.c
+@@ -21,6 +21,7 @@
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
++#include <stdio.h>
+ #include "user_private.h"
+ #include "controls.h"
+ #include "dde.h"
+@@ -77,14 +78,14 @@
+ 
+ DWORD get_input_codepage( void )
+ {
+-    DWORD cp;
+-    int ret;
+-    HKL hkl = NtUserGetKeyboardLayout( 0 );
+-
+-    ret = GetLocaleInfoW( LOWORD(hkl), LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
+-                          (WCHAR *)&cp, sizeof(cp) / sizeof(WCHAR) );
+-    if (!ret) cp = CP_ACP;
+-    return cp;
++    /*
++     * This Wine payload belongs to the Azrok-only preserved root.  Azrok's
++     * ANSI controls and network strings are CP949, but existing browser
++     * IndexedDB prefixes can retain an English ACP/HKL even after the root
++     * gained Korean NLS files.  Keep physical keyboard bindings untouched
++     * while making every ANSI message conversion use the game's code page.
++     */
++    return 949;
+ }
+ 
+ /***********************************************************************
+@@ -196,6 +197,9 @@
+             cp = get_input_codepage();
+             wch[0] = LOWORD(msg->wParam);
+             len = WideCharToMultiByte( cp, 0, wch, 1, (LPSTR)ch, 2, NULL, NULL );
++            if (wch[0] >= 0x80)
++                fprintf( stderr, "D3D9WEB_IME_WTOA unicode=%04x cp=%lu len=%lu bytes=%02x,%02x\n",
++                         wch[0], (unsigned long)cp, (unsigned long)len, ch[0], ch[1] );
+             if (len == 2)  /* DBCS char */
+             {
+                 struct wm_char_mapping_data *data = get_wmchar_data();
+diff --git a/dlls/user32/winproc.c b/dlls/user32/winproc.c
+--- a/dlls/user32/winproc.c
++++ b/dlls/user32/winproc.c
+@@ -21,6 +21,7 @@
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
++#include <stdio.h>
+ #include "user_private.h"
+ #include "controls.h"
+ #include "dbt.h"
+@@ -663,6 +664,10 @@
+             char ch[2];
+             DWORD cp = get_input_codepage();
+             DWORD len = WideCharToMultiByte( cp, 0, &wch, 1, ch, 2, NULL, NULL );
++            if (wch >= 0x80)
++                fprintf( stderr, "D3D9WEB_IME_WINPROC unicode=%04x cp=%lu len=%lu bytes=%02x,%02x\n",
++                         wch, (unsigned long)cp, (unsigned long)len,
++                         (unsigned char)ch[0], (unsigned char)ch[1] );
+             ret = callback( hwnd, msg, (BYTE)ch[0], lParam, result, arg );
+             if (len == 2) ret = callback( hwnd, msg, (BYTE)ch[1], lParam, result, arg );
+         }
+diff --git a/dlls/winegstreamer/main.c b/dlls/winegstreamer/main.c
+--- a/dlls/winegstreamer/main.c
++++ b/dlls/winegstreamer/main.c
+@@ -172,8 +172,13 @@
+ 
+     TRACE("output_compressed %d.\n", output_compressed);
+ 
+-    if (WINE_UNIX_CALL(unix_wg_parser_create, &params))
++    NTSTATUS status;
++
++    if ((status = WINE_UNIX_CALL(unix_wg_parser_create, &params)))
++    {
++        ERR("unix_wg_parser_create failed with status %#lx.\n", status);
+         return 0;
++    }
+ 
+     TRACE("Returning parser %#I64x.\n", params.parser);
+ 
+diff --git a/dlls/winegstreamer/quartz_transform.c b/dlls/winegstreamer/quartz_transform.c
+--- a/dlls/winegstreamer/quartz_transform.c
++++ b/dlls/winegstreamer/quartz_transform.c
+@@ -413,11 +413,29 @@
+     return S_OK;
+ }
+ 
++static HRESULT transform_sink_begin_flush(struct strmbase_sink *pin)
++{
++    struct transform *filter = impl_from_strmbase_filter(pin->pin.filter);
++    HRESULT hr;
++
++    TRACE("(%p)\n", pin);
++
++    hr = wg_transform_flush(filter->transform);
++
++    wg_sample_queue_flush(filter->sample_queue, true);
++
++    if (filter->source.pin.peer)
++        IPin_BeginFlush(filter->source.pin.peer);
++
++    return hr;
++}
++
+ static const struct strmbase_sink_ops sink_ops =
+ {
+     .base.pin_query_accept = transform_sink_query_accept,
+     .base.pin_query_interface = transform_sink_query_interface,
+     .pfnReceive = transform_sink_receive,
++    .sink_begin_flush = transform_sink_begin_flush,
+ };
+ 
+ static HRESULT transform_source_query_accept(struct strmbase_pin *pin, const AM_MEDIA_TYPE *mt)
+diff --git a/dlls/winegstreamer/wg_parser.c b/dlls/winegstreamer/wg_parser.c
+--- a/dlls/winegstreamer/wg_parser.c
++++ b/dlls/winegstreamer/wg_parser.c
+@@ -1485,10 +1485,20 @@
+         gst_event_set_seqnum(flush_event, seqnum);
+         push_event(parser->my_src, flush_event);
+         if (thread)
+-            gst_pad_set_active(parser->my_src, 1);
++            /* Joining the completed producer also clears push_thread.  The
++             * activation after FLUSH_STOP can then create a fresh producer
++             * at next_offset.  Leaving the pad active here keeps the stale
++             * pthread handle after EOS and makes a successful running seek
++             * produce no second pass of data. */
++            gst_pad_set_active(parser->my_src, 0);
+     }
+ 
+     parser->next_offset = parser->start_offset = cur;
++    /* Pull-mode parsers use next_pull_offset whenever the downstream
++     * element requests GST_BUFFER_OFFSET_NONE.  At EOS it points past the
++     * file; leaving it there makes a successful seek-to-zero read EOS again
++     * forever instead of starting the next loop. */
++    parser->next_pull_offset = cur;
+ 
+     /* and prepare to continue streaming */
+     if (flags & GST_SEEK_FLAG_FLUSH)
+diff --git a/dlls/winex11.drv/keyboard.c b/dlls/winex11.drv/keyboard.c
+--- a/dlls/winex11.drv/keyboard.c
++++ b/dlls/winex11.drv/keyboard.c
+@@ -1380,6 +1380,11 @@
+ 
+     if (status == XLookupChars)
+     {
++            HWND root = hwnd;
++            HWND focus = get_focus();
++
++        if (focus && (focus == hwnd || NtUserIsChild( hwnd, focus ))) hwnd = focus;
++            fprintf( stderr, "D3D9WEB_IME_FOCUS root=%p focus=%p target=%p\n", root, focus, hwnd );
+         xim_set_result_string( hwnd, Str, ascii_chars );
+         if (buf != Str)
+             free( Str );
+diff --git a/dlls/winex11.drv/xim.c b/dlls/winex11.drv/xim.c
+--- a/dlls/winex11.drv/xim.c
++++ b/dlls/winex11.drv/xim.c
+@@ -105,14 +105,24 @@
+ void xim_set_result_string( HWND hwnd, const char *str, UINT count )
+ {
+     WCHAR *output;
+-    DWORD len;
++    DWORD i, len, output_bytes;
+ 
+     TRACE( "hwnd %p, string %s\n", hwnd, debugstr_an(str, count) );
+ 
+     if (!(output = malloc( (count + 1) * sizeof(WCHAR) ))) return;
+-    len = ntdll_umbstowcs( str, count, output, count );
++    /* BoxedWine's fake XIM contract always returns committed UTF-8 bytes. */
++    if (RtlUTF8ToUnicodeN( output, count * sizeof(WCHAR), &output_bytes, str, count ))
++    {
++        free( output );
++        return;
++    }
++    len = output_bytes / sizeof(WCHAR);
+     output[len] = 0;
+-
++    for (i = 0; i < len; ++i)
++        fprintf( stderr, "D3D9WEB_IME_XIM_UTF16 index=%lu value=%04x\n",
++                 (unsigned long)i, output[i] );
++    fprintf( stderr, "D3D9WEB_IME_POST_RESULT hwnd=%p chars=%lu\n",
++             hwnd, (unsigned long)len );
+     post_ime_update( hwnd, 0, NULL, output );
+ 
+     free( output );
+diff --git a/dlls/ws2_32/socket.c b/dlls/ws2_32/socket.c
+--- a/dlls/ws2_32/socket.c
++++ b/dlls/ws2_32/socket.c
+@@ -3720,7 +3720,7 @@
+     TRACE( "socket %#Ix, event %p, events %p\n", s, event, ret_events );
+ 
+     status = NtDeviceIoControlFile( (HANDLE)s, NULL, NULL, NULL, &io, IOCTL_AFD_GET_EVENTS,
+-                                    event, 0, &params, sizeof(params) );
++                              event, 0, &params, sizeof(params) );
+     if (!status)
+     {
+         ret_events->lNetworkEvents = afd_poll_flag_to_win32( params.flags );
+@@ -3788,12 +3788,10 @@
+     NTSTATUS status;
+ 
+     TRACE( "socket %#Ix, event %p, mask %#lx\n", s, event, mask );
+-
+     params.event = event;
+     params.mask = afd_poll_flag_from_win32( mask );
+-
+     status = NtDeviceIoControlFile( (HANDLE)s, NULL, NULL, NULL, &io, IOCTL_AFD_EVENT_SELECT,
+-                                    &params, sizeof(params), NULL, 0 );
++                              &params, sizeof(params), NULL, 0 );
+     SetLastError( NtStatusToWSAError( status ) );
+     TRACE( "status %#lx.\n", status );
+     return status ? -1 : 0;
+diff --git a/server/sock.c b/server/sock.c
+--- a/server/sock.c
++++ b/server/sock.c
+@@ -823,6 +823,11 @@
+ {
+     int ev = sock_get_poll_events( sock->fd );
+ 
++    /* Browser WSAEventSelect diagnosis: record the server-side state which
++     * decides whether the Emscripten native socket is armed for POLLIN. */
++    fprintf( stderr, "D3D9WEB_SOCK_RESELECT state=%x mask=%x pending=%x reported=%x ev=%x\\n",
++             sock->state, sock->mask, sock->pending_events, sock->reported_events, ev );
++
+     if (debug_level)
+         fprintf(stderr,"sock_reselect(%p): new mask %x\n", sock, ev);
+ 
+@@ -4195,6 +4200,8 @@
+     }
+ 
+     reply->flags = sock->pending_events & sock->mask;
++    fprintf( stderr, "D3D9WEB_SOCKET_GET_EVENTS flags=%x state=%x mask=%x pending=%x reported=%x\\n",
++             reply->flags, sock->state, sock->mask, sock->pending_events, sock->reported_events );
+     for (i = 0; i < ARRAY_SIZE( status ); ++i)
+         status[i] = sock_get_ntstatus( sock->errors[i] );
+ 

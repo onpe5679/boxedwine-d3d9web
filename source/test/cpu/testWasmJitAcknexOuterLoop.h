@@ -1,0 +1,4 @@
+#ifndef __TEST_WASM_JIT_ACKNEX_OUTER_LOOP_H__
+#define __TEST_WASM_JIT_ACKNEX_OUTER_LOOP_H__
+void testWasmJitAcknexOuterLoop();
+#endif

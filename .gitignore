@@ -1,0 +1,107 @@
+# ===== boxedwine-d3d9web =====================================================
+# Everything below is a deliberate "never commit" list.  Prebuilt binaries are
+# distributed as GitHub Release assets instead (see RELEASE_ASSETS.md).
+
+# --- build outputs ---------------------------------------------------------
+/project/emscripten/Build/
+/project/emscripten/*.wasm
+/project/emscripten/boxedwine.*.js
+/d3d9web/guest/out/
+/d3d9web/**/*.obj
+/d3d9web/**/*.dll
+/d3d9web/**/*.exe
+/d3d9web/**/*.map
+/d3d9web/**/*.lib
+/d3d9web/**/*.exp
+/d3d9web/**/*.pdb
+/d3d9web/**/*.ilk
+*.wasm
+
+# --- app / guest-filesystem / profile packages (contain game data or large blobs)
+/apps/
+/fs/
+/profiles/
+/project/emscripten/*.zip
+/d3d9web/**/*.zip
+
+# --- game assets: never commit -----------------------------------------------
+/Data/
+*.wmb
+*.mdl
+*.pcx
+*.wis
+*.tga
+*.ogg
+*.mp3
+*.wmv
+
+# --- logs, captures, dumps ---------------------------------------------------
+*.log
+*.err
+*.dmp
+/logs/
+/captures/
+/artifacts/
+
+# --- local tooling / state ---------------------------------------------------
+/emsdk/
+__pycache__/
+*.pyc
+.omc/
+.claude/
+node_modules/
+.env
+.env.*
+*.pfx
+*.pem
+*.key
+
+# ===== upstream Boxedwine ignore rules (verbatim from danoon2/Boxedwine @ 35dc3f0) ==
+project/msvc/BoxedWine/.vs/
+project/msvc/BoxedWine/BoxedWine/BoxedWine.vcxproj.user
+project/msvc/BoxedWine/ARM64/
+project/msvc/BoxedWine/x64/
+project/msvc/BoxedWine/Debug/
+project/msvc/BoxedWine/Release/
+project/msvc/BoxedWine/BoxedWine/x64/
+project/msvc/BoxedWine/BoxedWine/ARM64/
+project/msvc/BoxedWine/BoxedWine/Debug/
+project/msvc/BoxedWine/BoxedWine/Release/
+project/msvc/BoxedWine/zlib/ARM64/
+project/msvc/BoxedWine/zlib/x64/
+project/msvc/BoxedWine/zlib/Debug/
+project/msvc/BoxedWine/zlib/Release/
+project/msvc/BoxedWine/BoxedWine/Test/
+project/msvc/BoxedWine/zlib/Test/
+project/msvc/BoxedWine/Test/
+lib/sdl2/VisualC/SDL/Win32/
+lib/sdl2/VisualC/SDL/Debug/
+lib/sdl2/VisualC/SDL/ARM64/
+lib/sdl2/VisualC/SDL/x64/
+lib/sdl2/VisualC/SDLmain/Win32/
+lib/sdl2/VisualC/SDLmain/Debug/
+lib/sdl2/VisualC/SDLmain/ARM64/
+lib/sdl2/VisualC/SDLmain/x64/
+project/msvc/BoxedWine/BoxedWine/imgui.ini
+project/linux/bin/
+project/linux/linux_build/
+project/mac-xcode/bin/
+project/emscripten/Build/
+**/imgui.ini
+**/*.vcxproj.user
+project/linux/msvc-remote/Boxedwine/.vs/
+project/linux/msvc-remote/Boxedwine/Boxedwine/bin/
+project/linux/msvc-remote/Boxedwine/Boxedwine/obj/
+**/xcuserdata/*
+tools/vulkan/gen/
+tools/BoxedwineRunner/out/
+tools/jenkins/*.log
+tools/jenkins/*.pid
+project/linux/Deploy/LocalBuildSite/
+lib/mac
+.vs/
+.github/
+project/mac-xcode/Boxedwine/DerivedDataCoverage
+*.xcresult
+*.profraw
+.codex-worktrees/

@@ -1,0 +1,442 @@
+/*
+ *  Copyright (C) 2012-2025  The BoxedWine Team
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ */
+
+#include "boxedwine.h"
+#ifdef BOXEDWINE_ZLIB
+#undef OF
+#define STRICTUNZIP
+extern "C"
+{
+    #include "../../lib/zlib/contrib/minizip/unzip.h"
+}
+#include "fsfilenode.h"
+#include "fszip.h"
+#include "fszipnode.h"
+#include <time.h> 
+
+#ifdef BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE
+namespace {
+std::atomic<U64> azrokFaceWisGlobalZipGeneration{1};
+}
+
+U64 FsZip::getAzrokFaceWisGlobalGeneration() {
+    return azrokFaceWisGlobalZipGeneration.load(std::memory_order_acquire);
+}
+
+void FsZip::noteAzrokFaceWisGlobalMutation() {
+    azrokFaceWisGlobalZipGeneration.fetch_add(1, std::memory_order_acq_rel);
+}
+
+#ifdef BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE_SCOPED_GENERATION_V1
+void FsZip::noteAzrokFaceWisMutation() {
+    azrokFaceWisMutationGeneration.fetch_add(1,std::memory_order_acq_rel);
+    noteAzrokFaceWisGlobalMutation();
+}
+#endif
+#endif
+
+void FsZip::setupZipRead(U64 zipOffset, U64 zipFileOffset) {
+#ifdef BOXEDWINE_ZLIB    
+    if (zipOffset != lastZipOffset || zipFileOffset < lastZipFileOffset) {
+        unzCloseCurrentFile(this->zipfile);
+        unzSetOffset64(this->zipfile, zipOffset);
+        lastZipFileOffset = 0;
+        unzOpenCurrentFile(this->zipfile);
+        lastZipOffset = zipOffset;
+    }
+    if (zipFileOffset != lastZipFileOffset) {
+        char tmp[4096] = {};
+        U32 todo = (U32)(zipFileOffset - lastZipFileOffset);
+        while (todo) {
+            todo-=unzReadCurrentFile(this->zipfile, tmp, todo>4096?4096:todo);
+        }
+    }  
+#endif
+}
+
+bool FsZip::init(BString zipPath, BString mount) {
+#ifdef BOXEDWINE_ZLIB
+    BString strippedMount;
+
+    std::shared_ptr<FsNode> root = Fs::getNodeFromLocalPath(B(""), B(""), true);
+    deleteFilePath = root->nativePath.stringByApppendingPath(Fs::getFileNameFromNativePath(zipPath) + ".deleted");
+    if (mount.length()) {
+        Fs::makeLocalDirs(mount);
+        strippedMount = mount.substr(0, mount.length() - 1);
+    }
+    this->lastZipOffset = 0xFFFFFFFFFFFFFFFFl;
+    if (zipPath.length()) {
+        unz_global_info global_info = {};
+
+        this->zipPath = zipPath;
+        this->zipfile = unzOpen(zipPath.c_str());
+        if (!this->zipfile) {
+            klog_fmt("Could not load zip file: %s", zipPath.c_str());
+            return false;
+        }
+#ifdef BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE
+        this->azrokFaceWisGeneration =
+            azrokFaceWisGlobalZipGeneration.fetch_add(1,
+                std::memory_order_acq_rel) + 1;
+#endif
+
+        if (unzGetGlobalInfo( this->zipfile, &global_info ) != UNZ_OK) {
+            klog_fmt("Could not read file global info from zip file: %s", zipPath.c_str());
+            unzClose( this->zipfile );
+            return false;
+        }
+        fsZipInfo* zipInfo = new fsZipInfo[global_info.number_entry];
+        for (U32 i = 0; i < global_info.number_entry; ++i) {
+            unz_file_info file_info = {};
+            struct tm tm={0};
+            char tmp[MAX_FILEPATH_LEN];
+
+            tmp[0] = '/';
+            if ( unzGetCurrentFileInfo(this->zipfile, &file_info, tmp + 1, MAX_FILEPATH_LEN - 1, nullptr, 0, nullptr, 0 ) != UNZ_OK ) {
+                klog_fmt("Could not read file info from zip file: %s", zipPath.c_str());
+                delete[] zipInfo;
+                unzClose( zipfile );
+                return false;
+            }
+            zipInfo[i].filename = BString::copy(tmp);
+            zipInfo[i].offset = unzGetOffset64(this->zipfile);
+            zipInfo[i].compressedLength = file_info.compressed_size;
+            zipInfo[i].compressionMethod = (U32)file_info.compression_method;
+#ifdef BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE
+            zipInfo[i].crc32 = (U32)file_info.crc;
+#endif
+            Fs::remoteNameToLocal(zipInfo[i].filename); // converts special characters like :
+
+            if (zipInfo[i].filename.endsWith("/")) {
+                zipInfo[i].filename = zipInfo[i].filename.substr(0, zipInfo[i].filename.length() - 1);
+                zipInfo[i].isDirectory = true;
+            } else {
+                zipInfo[i].length = file_info.uncompressed_size;
+            }               
+            tm.tm_sec = file_info.tmu_date.tm_sec;
+            tm.tm_min = file_info.tmu_date.tm_min;
+            tm.tm_hour = file_info.tmu_date.tm_hour;
+            tm.tm_mday = file_info.tmu_date.tm_mday;
+            tm.tm_mon = file_info.tmu_date.tm_mon;
+            tm.tm_year = file_info.tmu_date.tm_year;
+            if (tm.tm_year>1900)
+                tm.tm_year-=1900;
+
+            zipInfo[i].lastModified = ((U64)mktime(&tm))*1000l;
+
+            if (!zipInfo[i].isDirectory && zipInfo[i].compressionMethod == 0) {
+                if (unzOpenCurrentFile(this->zipfile) == UNZ_OK) {
+                    zipInfo[i].dataOffset = unzGetCurrentFileZStreamPos64(this->zipfile);
+                    unzCloseCurrentFile(this->zipfile);
+                }
+            }
+
+            unzGoToNextFile(this->zipfile);
+        }
+        std::vector<BString> deletedLocalPaths;
+        readLinesFromFile(deleteFilePath, deletedLocalPaths);
+
+        for (U32 i = 0; i < global_info.number_entry; ++i) {
+            if (zipInfo[i].filename.endsWith(EXT_LINK)) {
+                char tmp[MAX_FILEPATH_LEN];
+                zipInfo[i].filename = zipInfo[i].filename.substr(0, zipInfo[i].filename.length() - 5);
+                zipInfo[i].isLink = true;
+                unzSetOffset64(zipfile, zipInfo[i].offset);
+                unzOpenCurrentFile(zipfile);
+                U32 read = unzReadCurrentFile(this->zipfile, tmp, MAX_FILEPATH_LEN);
+                tmp[read] = 0;
+                zipInfo[i].link = BString::copy(tmp);
+                unzCloseCurrentFile(this->zipfile);
+            }
+            BString localZipPart = zipInfo[i].filename;
+            Fs::remoteNameToLocal(localZipPart);
+            BString localPath = strippedMount + localZipPart;
+            if (vectorIndexOf(deletedLocalPaths, localPath) != -1) {
+                continue;
+            }
+            BString parentPath = Fs::getParentPath(localPath);
+            std::shared_ptr<FsNode> parent = Fs::getNodeFromLocalPath(B(""), parentPath, true);
+            if (!parent) {
+                Fs::makeLocalDirs(parentPath);
+                parent = Fs::getNodeFromLocalPath(B(""), parentPath, true);
+            }
+            BString localFileName = Fs::getFileNameFromPath(localPath);
+            BString nativePath = Fs::getNativePathFromParentAndLocalFilename(parent, localFileName);
+            std::shared_ptr<FsNode> existingNode = Fs::getNodeFromLocalPath(B(""), localPath, false);
+            if (!existingNode) {
+                std::shared_ptr<FsFileNode> node = Fs::addFileNode(localPath, zipInfo[i].link, nativePath, zipInfo[i].isDirectory, parent);
+                node->zipNode = std::make_shared<FsZipNode>(zipInfo[i], shared_from_this());
+            }
+        }   
+        delete[] zipInfo;
+    }
+#endif
+    return true;
+}
+
+FsZip::~FsZip() {
+#ifdef BOXEDWINE_ZLIB
+#ifdef BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE
+    noteAzrokFaceWisGlobalMutation();
+#endif
+    unzClose(this->zipfile);
+#endif
+}
+
+void FsZip::remove(BString localPath) {
+    BOXEDWINE_CRITICAL_SECTION;
+#ifdef BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE_SCOPED_GENERATION_V1
+    // Any detach attempt can invalidate an exact held archive, even when the
+    // deletion record already exists. Publish before inspecting/writing it.
+    noteAzrokFaceWisMutation();
+#endif
+    std::vector<BString> lines;
+    readLinesFromFile(deleteFilePath, lines);
+    if (vectorIndexOf(lines, localPath) == -1) {
+        lines.push_back(localPath);
+        writeLinesToFile(deleteFilePath, lines);
+#if defined(BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE) && \
+        !defined(BOXEDWINE_WASM_JIT_AZROK_FACE_WIS_HLE_SCOPED_GENERATION_V1)
+        noteAzrokFaceWisGlobalMutation();
+#endif
+    }
+}
+
+bool FsZip::doesFileExist(BString zipFile, BString file) {
+    unzFile z = unzOpen(zipFile.c_str());
+    unz_global_info global_info = {};
+    if (!z) {
+        return false;
+    }
+    if (unzGetGlobalInfo(z, &global_info) != UNZ_OK) {
+        unzClose(z);
+        return false;
+    }
+    for (U32 i = 0; i < global_info.number_entry; ++i) {
+        unz_file_info file_info;
+        char tmp[MAX_FILEPATH_LEN];
+
+        if (unzGetCurrentFileInfo(z, &file_info, tmp, MAX_FILEPATH_LEN, nullptr, 0, nullptr, 0) != UNZ_OK) {
+            unzClose(z);
+            return false;
+        }
+
+        if (file == tmp) {
+            unzCloseCurrentFile(z);
+            unzClose(z);
+            return true;
+        }
+        unzGoToNextFile(z);
+    }
+    unzClose(z);
+    return false;
+}
+
+bool FsZip::readFileFromZip(BString zipFile, BString file, BString& result) {
+    unzFile z = unzOpen(zipFile.c_str());
+    unz_global_info global_info = {};
+    if (!z) {
+        return false;
+    }
+    if (unzGetGlobalInfo( z, &global_info ) != UNZ_OK) {
+        unzClose( z );
+        return false;
+    }
+    for (U32 i = 0; i < global_info.number_entry; ++i) {
+        unz_file_info file_info;
+        char tmp[MAX_FILEPATH_LEN];
+
+        if ( unzGetCurrentFileInfo(z, &file_info, tmp, MAX_FILEPATH_LEN, nullptr, 0, nullptr, 0 ) != UNZ_OK ) {
+            unzClose( z );
+            return false;
+        }
+        
+        if (file == tmp) {
+            char* buffer = new char[file_info.uncompressed_size+1];
+            unzOpenCurrentFile(z);            
+            U32 read = unzReadCurrentFile(z, buffer, (unsigned)file_info.uncompressed_size);
+            buffer[read]=0;
+            unzCloseCurrentFile(z);
+            unzClose(z);
+            result = BString::copy(buffer);
+            delete[] buffer;
+            return true;
+        }
+        unzGoToNextFile(z);
+    }
+    unzClose(z);
+    return false;
+}
+
+bool FsZip::extractFileFromZip(BString zipFile, BString file, BString path) {
+    unzFile z = unzOpen(zipFile.c_str());
+    unz_global_info global_info = {};
+    if (!z) {
+        return false;
+    }
+    if (unzGetGlobalInfo( z, &global_info ) != UNZ_OK) {
+        unzClose( z );
+        return false;
+    }
+    for (U32 i = 0; i < global_info.number_entry; ++i) {
+        unz_file_info file_info;
+        char tmp[MAX_FILEPATH_LEN];
+
+        if ( unzGetCurrentFileInfo(z, &file_info, tmp, MAX_FILEPATH_LEN, nullptr, 0, nullptr, 0 ) != UNZ_OK ) {
+            unzClose( z );
+            return false;
+        }
+        
+        if (file == tmp) {
+            unzOpenCurrentFile(z);            
+            if (!Fs::doesNativePathExist(path)) {
+                Fs::makeNativeDirs(path);
+            }
+            BString outPath = path.stringByApppendingPath(Fs::getFileNameFromPath(file));
+            FILE* f = fopen(outPath.c_str(), "wb");
+            if (f) {
+                U32 totalRead = 0;
+                U8 buffer[4096] = {};
+
+                while (totalRead<file_info.uncompressed_size) {
+                    U32 read = unzReadCurrentFile(z, buffer, sizeof(buffer));
+                    if (!read) {
+                        break;
+                    }
+                    totalRead += read;
+                    fwrite(buffer, read, 1, f);
+                }
+                fclose(f);
+                unzCloseCurrentFile(z);
+                unzClose(z);
+                return totalRead==file_info.uncompressed_size;
+            } else {
+                unzCloseCurrentFile(z);
+                unzClose(z);
+                return false;
+            }
+        }
+        unzGoToNextFile(z);
+    }
+    unzClose(z);
+    return false;
+}
+
+bool FsZip::iterateFiles(BString zipFile, std::function<void(BString)> it) {
+    unzFile z = unzOpen(zipFile.c_str());
+    unz_global_info global_info = {};
+    if (!z) {
+        return false;
+    }
+
+    if (unzGetGlobalInfo(z, &global_info) != UNZ_OK) {
+        unzClose(z);
+        return false;
+    }
+
+    for (U32 i = 0; i < global_info.number_entry; ++i) {
+        unz_file_info file_info;
+        char tmp[MAX_FILEPATH_LEN];
+
+        if (unzGetCurrentFileInfo(z, &file_info, tmp, MAX_FILEPATH_LEN, nullptr, 0, nullptr, 0) != UNZ_OK) {
+            unzClose(z);
+            return false;
+        }
+        it(BString::copy(tmp));
+        unzGoToNextFile(z);
+    }
+    unzClose(z);
+    return true;
+}
+
+BString FsZip::unzip(BString zipFile, BString path, std::function<void(U32, BString fileName)> percentDone) {
+    unzFile z = unzOpen(zipFile.c_str());
+    unz_global_info global_info = {};
+    if (!z) {
+        return "Could not open zip file: " + zipFile;
+    }
+    U64 fileSize = Fs::getNativeFileSize(zipFile);
+    U64 compressedFileSizeProcessed = 0;
+
+    if (unzGetGlobalInfo(z, &global_info) != UNZ_OK) {
+        unzClose(z);
+        return "Could not read file global info from zip file: "+ zipFile;
+    }
+    if (!Fs::doesNativePathExist(path)) {
+        if (!Fs::makeNativeDirs(path)) {
+            return "Could not create directory: " + path + "\n\n" + strerror(errno);
+        }
+    }
+    for (U32 i = 0; i < global_info.number_entry; ++i) {
+        unz_file_info file_info;
+        char tmp[MAX_FILEPATH_LEN];
+
+        if (unzGetCurrentFileInfo(z, &file_info, tmp, MAX_FILEPATH_LEN, nullptr, 0, nullptr, 0) != UNZ_OK) {
+            unzClose(z);
+            return "Could not read file info from zip file: "+zipFile;
+        }
+        BString fileName = BString::copy(tmp);
+        if (fileName.endsWith("/")) {
+            BString dirPath = path.stringByApppendingPath(fileName);
+            if (!Fs::doesNativePathExist(dirPath)) {
+                if (!Fs::makeNativeDirs(dirPath)) {
+                    unzClose(z);
+                    return "Could not create directory: " + dirPath + "\n\n" + strerror(errno);
+                }
+            }
+            unzGoToNextFile(z);
+            continue;
+        }
+        if (Fs::nativePathSeperator != "/") {
+            fileName = fileName.replace("/", Fs::nativePathSeperator);
+        }
+        unzOpenCurrentFile(z);        
+        percentDone((U32)(compressedFileSizeProcessed * 100 / fileSize), fileName);
+        BString outPath = path.stringByApppendingPath(fileName);
+#ifdef BOXEDWINE_MSVC
+        if (outPath.length() > 255) {
+            outPath = "\\\\?\\" + outPath;
+        }
+#endif
+        FILE* f = fopen(outPath.c_str(), "wb");
+        if (f) {
+            U32 totalRead = 0;
+            U8 buffer[4096] = {};
+
+            while (totalRead < file_info.uncompressed_size) {
+                U32 read = unzReadCurrentFile(z, buffer, sizeof(buffer));
+                if (!read) {
+                    break;
+                }
+                totalRead += read;
+                fwrite(buffer, read, 1, f);
+            }
+            fclose(f);
+            unzCloseCurrentFile(z);
+            compressedFileSizeProcessed += file_info.compressed_size;            
+        } else {
+            unzCloseCurrentFile(z);
+            unzClose(z);
+            return "Could not create file: " + outPath + "\n\n" + strerror(errno);
+        }
+        unzGoToNextFile(z);
+    }
+    unzClose(z);
+    return B("");
+}
+#endif
